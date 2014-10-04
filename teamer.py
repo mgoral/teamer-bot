@@ -19,6 +19,13 @@ import threading
 from message import Message
 import teamerconfig as cfg
 
+TRACE_LVL = 5
+logging.addLevelName(TRACE_LVL, "TRACE")
+def trace(self, message, *args, **kwargs):
+    if self.isEnabledFor(TRACE_LVL):
+        self._log(TRACE_LVL, message, args, **kwargs)
+logging.Logger.trace = trace
+
 log = logging.getLogger('teamer-bot.%s' % __name__)
 
 class Status:
@@ -91,8 +98,10 @@ class Connection:
                     self._finishWork()
                     break # TODO: maybe try to reconnect?
                 elif msg.command == "JOIN" and msg.prefix.startswith(cfg.nick):
+                    log.debug("Joined %s" % msg.args[0])
                     self._onChannel = True
                 elif msg.command == "KICK" and msg.args[0] == cfg.channel and msg.args[1] == cfg.nick:
+                    log.debug("Kicked from %s" % msg.args[0])
                     self._onChannel = False
                     self.joinChannel()
                 else:
@@ -152,7 +161,7 @@ class Connection:
 
     def _sendMessage(self, msg, critical = False):
         try:
-            log.debug(">> %s\r\n" % msg)
+            log.trace(">> %s\r\n" % msg)
             self._s.send("%s\r\n" % msg)
         except socket.timeout as e:
             log.error("Message timeout!")
@@ -163,7 +172,7 @@ class Connection:
 
     def _receiveMessage(self, bufsize = 4096):
         line = self._s.recv(bufsize)
-        log.debug(line)
+        log.trace(line)
         return self._parseMessage(line)
 
     # Shamelessly taken from Twisted Matrix (https://twistedmatrix.com/trac)
@@ -220,6 +229,7 @@ class StartConnection:
 
 
 def main():
+    # log.setLevel(TRACE_LVL)
     log.setLevel(logging.DEBUG)
     log.addHandler(logging.StreamHandler())
 
