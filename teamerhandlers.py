@@ -1,3 +1,5 @@
+#-*- coding: utf-8 -*-
+
 from message import Message
 import teamerconfig as cfg
 
@@ -7,7 +9,7 @@ For more information about command, type:
 \02/msg %(botnick)s help <command>
  
 Available commands:
-\02SET TAUNT UNSET VARCLEAR VARLIST\02
+\02SET TAUNT UNSET VARCLEAR VARLIST WHOIS\02
 ***** End of Help *****"""
 
 # usable variables for taunts:
@@ -23,6 +25,26 @@ variables = {}
 privateTaunts = {
     "help" : HELP_MSG,
 }
+
+def whois(message):
+    message = message.lower()
+
+    if "virgo" in message:
+        return "Michał Góral"
+    if "lelokrates" in message:
+        return "Radoslaw Fijolek"
+    if "smok" in message:
+        return "Krzysztof Birowski"
+    if "spawek" in message:
+        return "Maciej Oziębły"
+    if "student" in message:
+        return "Tomasz Flendrich"
+    if "steku" in message:
+        return "Krystian Horecki"
+    if "rrec" in message:
+        return "Dominik Małek"
+
+    return "Unknown nickname"
 
 def makeMessage(cmd, args = [], prefix = ""):
     return Message(prefix, cmd, args)
@@ -74,6 +96,10 @@ def parseCommand(message, defaultReply = None):
             return "Clears all stored variables."
         variables.clear()
         return "Done"
+    elif token == "whois":
+        if helpNeeded:
+            return "whois <nick>\nTries to identify other teamers."
+        return whois(message)
     return defaultReply
 
 def handlePrivMsg(msg):
