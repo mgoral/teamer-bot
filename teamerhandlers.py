@@ -32,7 +32,7 @@ def whois(message):
     if "virgo" in message:
         return "Michał Góral"
     if "lelokrates" in message:
-        return "Radoslaw Fijolek"
+        return "Radosław Fijołek"
     if "smok" in message:
         return "Krzysztof Birowski"
     if "spawek" in message:
@@ -43,6 +43,10 @@ def whois(message):
         return "Krystian Horecki"
     if "rrec" in message:
         return "Dominik Małek"
+    if "teamer" in message:
+        return "It's me, you silly! :)"
+    if "chanserv" in message:
+        return "Enemy bot }:-["
 
     return "Unknown nickname"
 
