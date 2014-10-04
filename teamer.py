@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python2.7
 #-*- coding: utf-8 -*-
 
 # Copyright © 2014 Michal Goral. All Rights Reserved.
@@ -8,18 +8,16 @@
 #          any later version.
 #          See LICENSE for details or <http://www.gnu.org/licenses/>
 
+import os
 import sys
 import socket
 import signal
 import logging
 
-log = logging.getLogger('teamer-bot.%s' % __name__)
+from message import Message
+import teamerconfig as cfg
 
-version = 0.1
-HELP_MSG = [
-        "BBConf Teamer bot, version: %s" % version,
-        "Currently I'm only idling and saying bullshit. ;)"
-    ]
+log = logging.getLogger('teamer-bot.%s' % __name__)
 
 class Status:
     OK = 0
@@ -33,54 +31,38 @@ class ExitWithStatus(Exception):
     def __init__(self, status):
         self.status = status
 
-class Message:
-    """Merely a wrapper for 3 named fields."""
-    def __init__(self, prefix = "", command = "", args = []):
-        self.prefix = prefix
-        self.command = command
-        self.args = args
-
 class Connection:
-    PASS = None                 # connection password. Won't be used if None
-    HOST = "chat.freenode.net"  # server address
-    PORT = 6667                 # server port (int)
-    CHANNEL = "#bbconf"         # default channel to connect
-
-    IDENT = "bbconf-teamer"     # bot username
-    NICK = "teamer"             # bot nicknakme
-    REALNAME = "BBConf Teamer"  # bot realname (might contain spaces)
-    OWNER = "virgoerns"         # nickname of bot owner
-
-    CONN_TIMEOUT = 30.0         # timeout (in seconds) for connection and messages
-
     def __init__(self):
         self._s = socket.socket()
-        self._s.settimeout(self.CONN_TIMEOUT)
+        self._s.settimeout(cfg.timeout)
         self._connected = False
+        self._onChannel = False
 
     def connect(self):
         self._startConnection()
 
-        if self.PASS is not None:
-            self._sendMessage("PASS %s" % self.PASS, True)
+        if cfg.password is not None:
+            self._sendMessage("PASS %s" % cfg.password, True)
 
-        self._sendMessage("NICK %s" % self.NICK, True)
+        self._sendMessage("NICK %s" % cfg.nick, True)
         self._sendMessage(
             "USER %(username)s %(hostname)s unused-server-name :%(realname)s" %
-                {"username" : self.IDENT, "hostname" : self.HOST, "realname" : self.REALNAME },
+                {"username" : cfg.ident, "hostname" : cfg.host, "realname" : cfg.realname },
             True)
 
-        log.debug("Connected to %s" % self.HOST)
+        log.debug("Connected to %s" % cfg.host)
         self._connected = True
 
     def quit(self):
         if self._connected is True:
             log.debug("Sending QUIT")
             self._sendMessage("QUIT")
+            self._connected = False
+            self._onChannel = False
 
     def joinChannel(self):
         if self._connected is True:
-            self._sendMessage("JOIN %s" % self.CHANNEL, True)
+            self._sendMessage("JOIN %s" % cfg.channel, True)
 
     def run(self):
         self.joinChannel()
@@ -94,18 +76,30 @@ class Connection:
                 elif msg.command == "KILL":
                     log.info("Disconnected from a server")
                     self._connected = False
+                    self._onChannel = False
                     break # TODO: maybe try to reconnect?
-                elif msg.command == "PRIVMSG":
-                    self._handlePrivMsg(msg)
+                elif msg.command == "JOIN" and msg.prefix.startswith(cfg.nick):
+                    self._onChannel = True
+                else:
+                    try:
+                        if self._onChannel:
+                            resps = cfg.messageHandler(msg, log)
+                            if resps is not  None:
+                                for resp in resps:
+                                    # FIXME: add to the queue (prevent flood throttling)
+                                    self._sendMessage(self._serializeMessage(resp))
+                    except Exception as e:
+                        log.debug("Exception occured during custom message handling:")
+                        log.debug("  %s" % e)
 
     def _startConnection(self):
         try:
-            self._s.connect((self.HOST, self.PORT))
+            self._s.connect((cfg.host, cfg.port))
         except socket.timeout as e:
-            log.error("Timeout on connection to %s:%s" % (self.HOST, self.PORT))
+            log.error("Timeout on connection to %s:%s" % (cfg.host, cfg.port))
             raise ExitWithStatus(Status.CONNECTION_FAILURE)
         except socket.gaierror as (errNo, msg):
-            log.error("Cannot resolve a hostname: %s"  % self.HOST)
+            log.error("Cannot resolve a hostname: %s"  % cfg.host)
             log.error(msg)
             raise ExitWithStatus(Status.CONNECTION_FAILURE)
 
@@ -137,7 +131,7 @@ class Connection:
         if msg[0] == ":":
             prefix, msg = msg[1:].split(" ", 1)
 
-        if msg.find(" :") != -1:
+        if " :" in msg:
             msg, trailing = msg.split(" :", 1)
             args = msg.split()
             args.append(trailing)
@@ -147,32 +141,24 @@ class Connection:
         command = args.pop(0)
         return Message(prefix, command, args)
 
-    def _handlePrivMsg(self, msg):
-        senderNick = msg.prefix
-        senderIdent = msg.prefix
+    def _serializeMessage(self, msgObj):
+        prefix = ""
+        command = msgObj.command
+        args = ""
 
-        if msg.prefix.find("!") != -1:  # nicknames can change, indent is harder to change
-            senderNick, senderIdent = msg.prefix.split("!", 1)
+        if msgObj.prefix:
+            prefix = ":%s " % prefix
 
-        targets = msg.args[:-1]
-        message = msg.args[-1].strip().lower()
+        if len(msgObj.args) > 0:
+            args, trailing = " ".join(msgObj.args[:-1]), msgObj.args[-1]
+            if args != "":
+                args = " %s" % args
+            if " " in trailing:
+                trailing = ":%s" % trailing
+            if trailing != "":
+                args = "%s %s" % (args, trailing)
 
-        # TODO: do not just hardcode it. Store it in a config file.
-        if self.CHANNEL in targets:
-            if message.startswith("hello"):
-               self._sendMessage("PRIVMSG %s :Hello... Is it me you're looking for?" % self.CHANNEL)
-            if message.startswith("i can see it in your eyes"):
-               self._sendMessage("PRIVMSG %s :I can see it in your smile" % self.CHANNEL)
-            if message.startswith("you're all i've ever wanted"):
-               self._sendMessage("PRIVMSG %s :...and my arms are open wide!" % self.CHANNEL)
-               self._sendMessage("PRIVMSG %s :'Cause you know just what to say" % self.CHANNEL)
-               self._sendMessage("PRIVMSG %s :And you know just what to do" % self.CHANNEL)
-               self._sendMessage("PRIVMSG %s :And I want to tell you so much..." % self.CHANNEL)
-               self._sendMessage("PRIVMSG %s :...I love you!" % self.CHANNEL)
-        elif self.NICK in targets:
-            if message.startswith("help"):
-                for line in HELP_MSG:
-                    self._sendMessage("PRIVMSG %s :%s" % (senderNick, line))
+        return "%s%s%s" % (prefix, command, args)
 
 class StartConnection:
     def __init__(self):
@@ -189,6 +175,9 @@ class StartConnection:
 def main():
     log.setLevel(logging.DEBUG)
     log.addHandler(logging.StreamHandler())
+
+    botpath = os.path.dirname(__file__)
+    os.chdir(botpath)
 
     with StartConnection() as c:
         c.run()
