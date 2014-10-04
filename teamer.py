@@ -13,6 +13,8 @@ import sys
 import socket
 import signal
 import logging
+import time
+import threading
 
 from message import Message
 import teamerconfig as cfg
@@ -32,11 +34,21 @@ class ExitWithStatus(Exception):
         self.status = status
 
 class Connection:
+    BURST_TIMEOUT = 10
+    BURST_MSG_NO = 5
+    MSG_INTERVAL = 0.8
+
     def __init__(self):
         self._s = socket.socket()
         self._s.settimeout(cfg.timeout)
         self._connected = False
         self._onChannel = False
+
+        self._lastMessageTime = int(time.time()) - self.BURST_TIMEOUT  # with a precision in seconds
+        self._queue = []
+        self._queueReaderThread = threading.Thread(target = self._queueHandler)
+        self._queueWriteLock = threading.Condition()
+        self._stopQueueReaderThread = threading.Event()
 
     def connect(self):
         self._startConnection()
@@ -57,8 +69,7 @@ class Connection:
         if self._connected is True:
             log.debug("Sending QUIT")
             self._sendMessage("QUIT")
-            self._connected = False
-            self._onChannel = False
+            self._finishWork()
 
     def joinChannel(self):
         if self._connected is True:
@@ -68,29 +79,65 @@ class Connection:
         self.joinChannel()
         self._s.settimeout(None) # no timeout, blocking mode
 
-        while True:
+        self._queueReaderThread.start()
+
+        while self._connected is True:
             msg = self._receiveMessage()
             if msg is not None:
                 if msg.command == "PING":
                     self._sendMessage("PONG")
                 elif msg.command == "KILL":
                     log.info("Disconnected from a server")
-                    self._connected = False
-                    self._onChannel = False
+                    self._finishWork()
                     break # TODO: maybe try to reconnect?
                 elif msg.command == "JOIN" and msg.prefix.startswith(cfg.nick):
                     self._onChannel = True
+                elif msg.command == "KICK" and msg.args[0] == cfg.channel and msg.args[1] == cfg.nick:
+                    self._onChannel = False
+                    self.joinChannel()
                 else:
                     try:
                         if self._onChannel:
                             resps = cfg.messageHandler(msg, log)
                             if resps is not  None:
-                                for resp in resps:
-                                    # FIXME: add to the queue (prevent flood throttling)
-                                    self._sendMessage(self._serializeMessage(resp))
+                                with self._queueWriteLock:
+                                    self._queue.extend(resps)
+                                    self._queueWriteLock.notifyAll()
                     except Exception as e:
                         log.debug("Exception occured during custom message handling:")
                         log.debug("  %s" % e)
+
+    def _queueHandler(self):
+        """Should be called in the other thread"""
+        while not self._stopQueueReaderThread.isSet():
+            with self._queueWriteLock:
+                # blocks until is notified.
+                # wait (release lock) until there's something to be sent
+                while len(self._queue) == 0:
+                    if self._stopQueueReaderThread.isSet():
+                        return
+                    self._queueWriteLock.wait()
+
+                now = time.time()
+                if (now - self._lastMessageTime) >= self.BURST_TIMEOUT:
+                    # burst maximum last 5 messages when the last message was sent a long ago
+                    for msg in self._queue[:self.BURST_MSG_NO]:
+                        self._sendMessage(self._serializeMessage(msg))
+                    self._queue = self._queue[self.BURST_MSG_NO:]
+                else:
+                    msg = self._queue.pop(0)
+                    self._sendMessage(self._serializeMessage(msg))
+                self._lastMessageTime = now
+            time.sleep(self.MSG_INTERVAL)
+
+    def _finishWork(self):
+        self._connected = False
+        self._onChannel = False
+        self._stopQueueReaderThread.set()
+        with self._queueWriteLock:
+            self._queue = []
+            self._queueWriteLock.notifyAll()
+        self._queueReaderThread.join()
 
     def _startConnection(self):
         try:
