@@ -90,8 +90,11 @@ class Connection:
         self._queueReaderThread.start()
 
         while self._connected is True:
-            msg = self._receiveMessage()
-            if msg is not None:
+            msgs = self._receiveMessages()
+            for msg in msgs:
+                if msg is None:
+                    continue
+
                 if msg.command == "PING":
                     self._sendMessage("PONG")
                 elif msg.command == "KILL":
@@ -171,10 +174,13 @@ class Connection:
                 log.error("It was a critical message! Terminating!")
                 raise ExitWithStatus(Status.MESSAGE_TIMEOUT)
 
-    def _receiveMessage(self, bufsize = 4096):
-        line = self._s.recv(bufsize)
-        log.trace(line)
-        return self._parseMessage(line)
+    def _receiveMessages(self, bufsize = 4096):
+        buf = ""
+        while not buf.endswith("\r\n"):
+            buf = buf + self._s.recv(bufsize)
+        log.trace(buf)
+        lines = buf.split("\r\n")
+        return [self._parseMessage(line) for line in lines]
 
     # Shamelessly taken from Twisted Matrix (https://twistedmatrix.com/trac)
     # Licensed under MIT License
