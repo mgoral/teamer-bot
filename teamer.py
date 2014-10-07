@@ -112,13 +112,24 @@ class Connection:
                     try:
                         if self._onChannel:
                             resps = cfg.messageHandler(msg, log)
-                            if resps is not  None:
-                                with self._queueWriteLock:
-                                    self._queue.extend(resps)
-                                    self._queueWriteLock.notifyAll()
+                            self._handleOutgoingMessages(resps)
                     except Exception as e:
                         log.debug("Exception occured during custom message handling:")
                         log.debug("  %s" % e)
+
+    def _handleOutgoingMessages(self, resps):
+        if resps is None:
+            return
+
+        # send anything other than PRIVMSG immediately
+        for i, resp in enumerate(resps):
+            if resp.command != "PRIVMSG":
+                self._sendMessage(self._serializeMessage(resp))
+                del resps[i]
+
+        with self._queueWriteLock:
+            self._queue.extend(resps)
+            self._queueWriteLock.notifyAll()
 
     def _queueHandler(self):
         """Should be called in the other thread"""
