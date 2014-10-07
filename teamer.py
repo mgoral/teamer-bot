@@ -15,6 +15,7 @@ import signal
 import logging
 import time
 import threading
+import argparse
 
 from message import Message
 import teamerconfig as cfg
@@ -227,10 +228,31 @@ class StartConnection:
     def __exit__(self, type_, value, traceback):
         self._connection.quit()
 
+def prepareOptions():
+    parser = argparse.ArgumentParser(description = "IRC Bot")
+    parser.add_argument("--dlevel", metavar = "LVL", dest = "loggingLevel", type = str,
+        default = "info", choices = ["info", "debug", "trace"],
+        help = "sets the logging level: trace|debug|info")
+
+    return parser
+
+def setLoggingLevel(lvl):
+    lvl = lvl.lower()
+    if lvl == "info":
+        log.setLevel(logging.INFO)
+    elif lvl == "debug":
+        log.setLevel(logging.DEBUG)
+    elif lvl == "trace":
+        log.setLevel(TRACE_LVL)
+    else:
+        log.error("Unknown debug level: %s" % lvl)
+        log.setLevel(logging.INFO)
 
 def main():
-    # log.setLevel(TRACE_LVL)
-    log.setLevel(logging.DEBUG)
+    optParser = prepareOptions()
+    args = optParser.parse_args()
+
+    setLoggingLevel(args.loggingLevel)
     log.addHandler(logging.StreamHandler())
 
     botpath = os.path.dirname(__file__)
