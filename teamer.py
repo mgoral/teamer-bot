@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 #-*- coding: utf-8 -*-
 
 # Copyright © 2014 Michal Goral. All Rights Reserved.
@@ -169,15 +169,16 @@ class Connection:
         except socket.timeout as e:
             log.error("Timeout on connection to %s:%s" % (cfg.host, cfg.port))
             raise ExitWithStatus(Status.CONNECTION_FAILURE)
-        except socket.gaierror as (errNo, msg):
+        except socket.gaierror as e:
             log.error("Cannot resolve a hostname: %s"  % cfg.host)
-            log.error(msg)
+            log.error(e.string)
             raise ExitWithStatus(Status.CONNECTION_FAILURE)
 
     def _sendMessage(self, msg, critical = False):
         try:
-            log.trace(">> %s\r\n" % msg)
-            self._s.send("%s\r\n" % msg)
+            s = "%s\r\n" % msg
+            log.trace(">> %s" % s)
+            self._s.send(s.encode())
         except socket.timeout as e:
             log.error("Message timeout!")
             log.debug("  %s" % msg)
@@ -188,7 +189,7 @@ class Connection:
     def _receiveMessages(self, bufsize = 4096):
         buf = ""
         while not buf.endswith("\r\n"):
-            buf = buf + self._s.recv(bufsize)
+            buf = buf + self._s.recv(bufsize).decode()
         log.trace(buf)
         lines = buf.split("\r\n")
         return [self._parseMessage(line) for line in lines]
